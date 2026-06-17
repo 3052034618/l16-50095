@@ -58,7 +58,8 @@ export function fetchNearby(
   lat: number,
   lng: number,
   radius: number,
-  category?: string
+  category?: string,
+  type?: 'user' | 'merchant' | 'all'
 ): Promise<NearbyResult> {
   const params = new URLSearchParams({
     lat: lat.toString(),
@@ -68,6 +69,10 @@ export function fetchNearby(
 
   if (category) {
     params.append('category', category);
+  }
+
+  if (type) {
+    params.append('type', type);
   }
 
   return request<NearbyResult>(`/nearby?${params.toString()}`);

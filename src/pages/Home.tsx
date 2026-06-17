@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Circle, Polygon, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Users, Navigation, Move, Wifi, WifiOff } from 'lucide-react';
+import { Users, Navigation, Move, Wifi, WifiOff, Eye, EyeOff, UserCheck } from 'lucide-react';
 import { useLocationStore } from '@/store/useLocationStore';
-import { fetchMerchants, fetchCategories, fetchFences, fetchFenceEvents } from '@/utils/api';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { fetchMerchants, fetchCategories, fetchFences } from '@/utils/api';
 import { haversineDistance, formatDistance } from '../../shared/geoUtils';
 import type { UserLocation, Fence, Merchant } from '../../shared/types';
 
@@ -57,18 +56,18 @@ export default function Home() {
     fences,
     merchants,
     isConnected,
-    setCurrentUser,
+    subscribedUserId,
+    setSubscribedUser,
     setCurrentPosition,
     addOrUpdateUser,
     setFences,
     setMerchants,
     setCategories,
-    setConnected,
   } = useLocationStore();
 
-  const { connect, disconnect, sendPosition, on, off } = useWebSocket();
   const [mapCenter, setMapCenter] = useState<[number, number]>(BEIJING_CENTER);
   const moveIntervalRef = useRef<number | null>(null);
+  const currentPosRef = useRef(currentPosition);
 
   const onlineUsersArray = useMemo(() => {
     return Array.from(onlineUsers.values());
@@ -89,11 +88,12 @@ export default function Home() {
       .sort((a, b) => a.distance - b.distance);
   }, [onlineUsersArray, currentPosition]);
 
-  useEffect(() => {
-    setCurrentUser(CURRENT_USER_ID);
-    setCurrentPosition(BEIJING_CENTER[0], BEIJING_CENTER[1]);
-    setMapCenter(BEIJING_CENTER);
+  const subscribedUser = useMemo(() => {
+    if (!subscribedUserId) return null;
+    return onlineUsers.get(subscribedUserId) || null;
+  }, [subscribedUserId, onlineUsers]);
 
+  useEffect(() => {
     const currentUser: UserLocation = {
       userId: CURRENT_USER_ID,
       name: CURRENT_USER_NAME,
@@ -103,7 +103,19 @@ export default function Home() {
       online: true,
     };
     addOrUpdateUser(currentUser);
-  }, [setCurrentUser, setCurrentPosition, addOrUpdateUser]);
+  }, [addOrUpdateUser]);
+
+  useEffect(() => {
+    if (subscribedUser) {
+      setMapCenter([subscribedUser.lat, subscribedUser.lng]);
+    } else {
+      setMapCenter([currentPosition.lat, currentPosition.lng]);
+    }
+  }, [subscribedUser, currentPosition]);
+
+  useEffect(() => {
+    currentPosRef.current = currentPosition;
+  }, [currentPosition]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -123,78 +135,15 @@ export default function Home() {
     loadData();
   }, [setMerchants, setCategories, setFences]);
 
-  useEffect(() => {
-    const handlePositionUpdate = (data: unknown) => {
-      const msg = data as { userId: string; lat: number; lng: number; timestamp: number; name?: string };
-      if (msg.userId === CURRENT_USER_ID) return;
-
-      const user: UserLocation = {
-        userId: msg.userId,
-        name: msg.name || msg.userId,
-        lat: msg.lat,
-        lng: msg.lng,
-        timestamp: msg.timestamp,
-        online: true,
-      };
-      addOrUpdateUser(user);
-    };
-
-    const handleOnlineUsers = (data: unknown) => {
-      const msg = data as { users: { userId: string; lat: number; lng: number; name: string }[] };
-      if (msg.users && Array.isArray(msg.users)) {
-        msg.users.forEach((u) => {
-          if (u.userId !== CURRENT_USER_ID) {
-            addOrUpdateUser({
-              userId: u.userId,
-              name: u.name || u.userId,
-              lat: u.lat,
-              lng: u.lng,
-              timestamp: Date.now(),
-              online: true,
-            });
-          }
-        });
-      }
-    };
-
-    const handleError = (data: unknown) => {
-      console.error('WebSocket error:', data);
-    };
-
-    on('position:update', handlePositionUpdate);
-    on('online:users', handleOnlineUsers);
-    on('error', handleError);
-
-    return () => {
-      off('position:update', handlePositionUpdate);
-      off('online:users', handleOnlineUsers);
-      off('error', handleError);
-    };
-  }, [on, off, addOrUpdateUser]);
-
-  useEffect(() => {
-    connect(CURRENT_USER_ID);
-
-    const reportInterval = window.setInterval(() => {
-      if (currentPosition.lat && currentPosition.lng) {
-        sendPosition(currentPosition.lat, currentPosition.lng);
-      }
-    }, 3000);
-
-    setConnected(true);
-
-    return () => {
-      clearInterval(reportInterval);
-      disconnect();
-      setConnected(false);
-    };
-  }, [connect, disconnect, sendPosition, currentPosition, setConnected]);
-
   const handleMoveMe = () => {
-    const latDelta = (Math.random() - 0.5) * 0.005;
-    const lngDelta = (Math.random() - 0.5) * 0.005;
-    const newLat = currentPosition.lat + latDelta;
-    const newLng = currentPosition.lng + lngDelta;
+    if (subscribedUserId) {
+      setSubscribedUser(null);
+    }
+
+    const latDelta = (Math.random() - 0.5) * 0.02;
+    const lngDelta = (Math.random() - 0.5) * 0.02;
+    const newLat = currentPosRef.current.lat + latDelta;
+    const newLng = currentPosRef.current.lng + lngDelta;
 
     setCurrentPosition(newLat, newLng);
     setMapCenter([newLat, newLng]);
@@ -208,7 +157,6 @@ export default function Home() {
       online: true,
     };
     addOrUpdateUser(currentUser);
-    sendPosition(newLat, newLng);
   };
 
   const handleStartAutoMove = () => {
@@ -218,13 +166,18 @@ export default function Home() {
       return;
     }
 
+    if (subscribedUserId) {
+      setSubscribedUser(null);
+    }
+
     moveIntervalRef.current = window.setInterval(() => {
-      const latDelta = (Math.random() - 0.5) * 0.002;
-      const lngDelta = (Math.random() - 0.5) * 0.002;
-      const newLat = currentPosition.lat + latDelta;
-      const newLng = currentPosition.lng + lngDelta;
+      const latDelta = (Math.random() - 0.5) * 0.008;
+      const lngDelta = (Math.random() - 0.5) * 0.008;
+      const newLat = currentPosRef.current.lat + latDelta;
+      const newLng = currentPosRef.current.lng + lngDelta;
 
       setCurrentPosition(newLat, newLng);
+      setMapCenter([newLat, newLng]);
 
       const currentUser: UserLocation = {
         userId: CURRENT_USER_ID,
@@ -235,8 +188,16 @@ export default function Home() {
         online: true,
       };
       addOrUpdateUser(currentUser);
-      sendPosition(newLat, newLng);
     }, 2000);
+  };
+
+  const handleSubscribeUser = (userId: string) => {
+    if (subscribedUserId === userId) {
+      setSubscribedUser(null);
+      setMapCenter([currentPosition.lat, currentPosition.lng]);
+    } else {
+      setSubscribedUser(userId);
+    }
   };
 
   useEffect(() => {
@@ -348,11 +309,26 @@ export default function Home() {
           {usersWithDistance.map((user) => (
             <div
               key={user.userId}
-              className="group flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:bg-slate-800/50"
+              onClick={() => handleSubscribeUser(user.userId)}
+              className={`group flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                subscribedUserId === user.userId
+                  ? 'bg-sky-500/20 border border-sky-500/30'
+                  : 'hover:bg-slate-800/50 border border-transparent'
+              }`}
             >
               <div className="relative flex-shrink-0">
-                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center ring-2 ring-slate-700/50">
-                  <span className="text-slate-300 font-medium text-sm">
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center ring-2 ${
+                    subscribedUserId === user.userId
+                      ? 'bg-sky-500/30 ring-sky-500/50'
+                      : 'bg-slate-700 ring-slate-700/50'
+                  }`}
+                >
+                  <span
+                    className={`font-medium text-sm ${
+                      subscribedUserId === user.userId ? 'text-sky-300' : 'text-slate-300'
+                    }`}
+                  >
                     {user.name.charAt(0)}
                   </span>
                 </div>
@@ -361,22 +337,41 @@ export default function Home() {
                     user.online ? 'bg-emerald-400' : 'bg-slate-500'
                   }`}
                 />
+                {subscribedUserId === user.userId && (
+                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-sky-500 rounded-full flex items-center justify-center ring-2 ring-slate-900">
+                    <Eye className="w-2.5 h-2.5 text-white" />
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <span
                     className={`font-medium text-sm truncate ${
-                      user.online ? 'text-slate-200' : 'text-slate-500'
+                      user.online
+                        ? subscribedUserId === user.userId
+                          ? 'text-sky-300'
+                          : 'text-slate-200'
+                        : 'text-slate-500'
                     }`}
                   >
                     {user.name}
                   </span>
                 </div>
                 <div className="flex items-center gap-1 mt-0.5">
-                  <Navigation className="w-3 h-3 text-sky-400" />
-                  <span className="text-xs text-slate-500">
-                    {formatDistance(user.distance)}
+                  <Navigation
+                    className={`w-3 h-3 ${
+                      subscribedUserId === user.userId ? 'text-sky-400' : 'text-sky-400'
+                    }`}
+                  />
+                  <span
+                    className={`text-xs ${
+                      subscribedUserId === user.userId ? 'text-sky-400' : 'text-slate-500'
+                    }`}
+                  >
+                    {subscribedUserId === user.userId
+                      ? '跟随中'
+                      : formatDistance(user.distance)}
                   </span>
                 </div>
               </div>

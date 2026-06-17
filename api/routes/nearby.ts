@@ -10,6 +10,7 @@ router.get('/', (req: Request, res: Response): void => {
     const lng = parseFloat(req.query.lng as string);
     const radius = parseFloat(req.query.radius as string) || 1000;
     const category = req.query.category as string | undefined;
+    const type = req.query.type as 'user' | 'merchant' | 'all' | undefined;
 
     if (isNaN(lat) || isNaN(lng)) {
       res.status(400).json({
@@ -19,7 +20,7 @@ router.get('/', (req: Request, res: Response): void => {
       return;
     }
 
-    const result: NearbyResult = searchNearby(lat, lng, radius, category);
+    const result: NearbyResult = searchNearby(lat, lng, radius, category, type);
 
     res.json({
       success: true,

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Navigation, Filter, MapPin } from 'lucide-react';
+import { Search, Navigation, Filter, MapPin, Users, Store, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useLocationStore } from '@/store/useLocationStore';
 import { fetchNearby, fetchCategories } from '@/utils/api';
 import { formatDistance } from '../../shared/geoUtils';
@@ -51,8 +51,11 @@ export default function Nearby() {
   const { currentPosition, categories, setCategories, setCurrentPosition, setCurrentUser } = useLocationStore();
   const [radius, setRadius] = useState(1000);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [showUsers, setShowUsers] = useState(true);
+  const [showMerchants, setShowMerchants] = useState(true);
   const [results, setResults] = useState<NearbyItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>(BEIJING_CENTER);
   const [mapZoom, setMapZoom] = useState(14);
 
@@ -103,25 +106,56 @@ export default function Nearby() {
     );
   };
 
+  const getSearchType = (): 'user' | 'merchant' | 'all' => {
+    if (showUsers && showMerchants) return 'all';
+    if (showUsers) return 'user';
+    if (showMerchants) return 'merchant';
+    return 'all';
+  };
+
   const handleSearch = async () => {
+    if (!showUsers && !showMerchants) {
+      setResults([]);
+      setHasSearched(true);
+      return;
+    }
+
     setIsSearching(true);
+    setHasSearched(true);
     try {
+      const searchType = getSearchType();
       let allResults: NearbyItem[] = [];
 
-      if (selectedCategories.length === 0) {
-        const result = await fetchNearby(
-          currentPosition.lat || BEIJING_CENTER[0],
-          currentPosition.lng || BEIJING_CENTER[1],
-          radius
-        );
-        allResults = result.items;
+      if (selectedCategories.length === 0 || searchType === 'user') {
+        if (searchType !== 'merchant') {
+          const result = await fetchNearby(
+            currentPosition.lat || BEIJING_CENTER[0],
+            currentPosition.lng || BEIJING_CENTER[1],
+            radius,
+            undefined,
+            searchType === 'all' ? 'user' : searchType
+          );
+          allResults = result.items;
+        }
+
+        if (searchType === 'all' || searchType === 'merchant') {
+          const merchantResult = await fetchNearby(
+            currentPosition.lat || BEIJING_CENTER[0],
+            currentPosition.lng || BEIJING_CENTER[1],
+            radius,
+            undefined,
+            'merchant'
+          );
+          allResults = [...allResults, ...merchantResult.items];
+        }
       } else {
         const promises = selectedCategories.map((cat) =>
           fetchNearby(
             currentPosition.lat || BEIJING_CENTER[0],
             currentPosition.lng || BEIJING_CENTER[1],
             radius,
-            cat
+            cat,
+            'merchant'
           )
         );
         const resultsArray = await Promise.all(promises);
@@ -134,13 +168,28 @@ export default function Nearby() {
             }
           });
         });
+
+        if (showUsers && searchType === 'all') {
+          const userResult = await fetchNearby(
+            currentPosition.lat || BEIJING_CENTER[0],
+            currentPosition.lng || BEIJING_CENTER[1],
+            radius,
+            undefined,
+            'user'
+          );
+          allResults = [...userResult.items, ...allResults];
+        }
       }
 
-      setResults(allResults);
+      const uniqueResults = allResults.filter(
+        (item, index, self) => index === self.findIndex((t) => t.id === item.id && t.type === item.type)
+      );
 
-      if (allResults.length > 0) {
-        const lats = allResults.map((r) => r.lat);
-        const lngs = allResults.map((r) => r.lng);
+      setResults(uniqueResults);
+
+      if (uniqueResults.length > 0) {
+        const lats = uniqueResults.map((r) => r.lat);
+        const lngs = uniqueResults.map((r) => r.lng);
         const minLat = Math.min(...lats, currentPosition.lat || BEIJING_CENTER[0]);
         const maxLat = Math.max(...lats, currentPosition.lat || BEIJING_CENTER[0]);
         const minLng = Math.min(...lngs, currentPosition.lng || BEIJING_CENTER[1]);
@@ -295,6 +344,36 @@ export default function Nearby() {
               </div>
             </div>
 
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-slate-400">搜索类型</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowUsers(!showUsers)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    showUsers
+                      ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                      : 'bg-slate-800/50 text-slate-500 border border-slate-700/30 hover:bg-slate-800'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  用户
+                </button>
+                <button
+                  onClick={() => setShowMerchants(!showMerchants)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    showMerchants
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      : 'bg-slate-800/50 text-slate-500 border border-slate-700/30 hover:bg-slate-800'
+                  }`}
+                >
+                  <Store className="w-4 h-4" />
+                  商家
+                </button>
+              </div>
+            </div>
+
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-slate-400">类别筛选</span>
@@ -312,10 +391,13 @@ export default function Nearby() {
                   <button
                     key={category.id}
                     onClick={() => toggleCategory(category.id)}
+                    disabled={!showMerchants}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
                       selectedCategories.includes(category.id)
                         ? 'bg-sky-500/30 text-sky-400 border border-sky-500/50'
-                        : 'bg-slate-700/50 text-slate-300 border border-slate-600/50 hover:bg-slate-700 hover:border-slate-500'
+                        : showMerchants
+                        ? 'bg-slate-700/50 text-slate-300 border border-slate-600/50 hover:bg-slate-700 hover:border-slate-500'
+                        : 'bg-slate-800/30 text-slate-600 border border-slate-700/20 cursor-not-allowed'
                     }`}
                   >
                     {category.name}
@@ -325,6 +407,11 @@ export default function Nearby() {
                   <span className="text-xs text-slate-500">加载中...</span>
                 )}
               </div>
+              {!showMerchants && selectedCategories.length > 0 && (
+                <p className="text-xs text-amber-400/70 mt-2">
+                  已关闭商家搜索，类别筛选暂不生效
+                </p>
+              )}
             </div>
           </div>
 

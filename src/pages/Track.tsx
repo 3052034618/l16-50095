@@ -16,6 +16,9 @@ import {
   SkipForward,
   Gauge,
   User,
+  Download,
+  Clock,
+  Calendar,
 } from "lucide-react";
 import { fetchTracks, fetchUsers } from "@/utils/api";
 import type { TrackPoint, UserLocation } from "../../shared/types";
@@ -75,11 +78,15 @@ function generateMockTrack(userId: string): TrackPoint[] {
 
 export default function Track() {
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
+  const [allTrackPoints, setAllTrackPoints] = useState<TrackPoint[]>([]);
   const [currentTimeIndex, setCurrentTimeIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [selectedUserId, setSelectedUserId] = useState("user1");
   const [users, setUsers] = useState<UserLocation[]>([]);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [endTime, setEndTime] = useState<number | null>(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   const animationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
@@ -155,15 +162,89 @@ export default function Track() {
     setCurrentTimeIndex(0);
     try {
       const data = await fetchTracks(userId);
+      let points: TrackPoint[];
       if (data && data.length > 0) {
-        setTrackPoints(data.sort((a, b) => a.timestamp - b.timestamp));
+        points = data.sort((a, b) => a.timestamp - b.timestamp);
       } else {
-        setTrackPoints(generateMockTrack(userId));
+        points = generateMockTrack(userId);
       }
+      setAllTrackPoints(points);
+      applyTimeFilter(points);
     } catch (error) {
       console.error("Failed to load track:", error);
-      setTrackPoints(generateMockTrack(userId));
+      const points = generateMockTrack(userId);
+      setAllTrackPoints(points);
+      applyTimeFilter(points);
     }
+  };
+
+  const applyTimeFilter = (points: TrackPoint[]) => {
+    let filtered = points;
+    if (startTime !== null) {
+      filtered = filtered.filter((p) => p.timestamp >= startTime);
+    }
+    if (endTime !== null) {
+      filtered = filtered.filter((p) => p.timestamp <= endTime);
+    }
+    setTrackPoints(filtered);
+  };
+
+  const handleTimeRangeChange = () => {
+    applyTimeFilter(allTrackPoints);
+    setCurrentTimeIndex(0);
+    setIsPlaying(false);
+  };
+
+  const resetTimeRange = () => {
+    setStartTime(null);
+    setEndTime(null);
+    setTrackPoints(allTrackPoints);
+    setCurrentTimeIndex(0);
+    setIsPlaying(false);
+  };
+
+  const exportTrackJSON = () => {
+    const data = {
+      userId: selectedUserId,
+      exportTime: new Date().toISOString(),
+      totalPoints: trackPoints.length,
+      points: trackPoints.map((p) => ({
+        lat: p.lat,
+        lng: p.lng,
+        timestamp: p.timestamp,
+        time: new Date(p.timestamp).toISOString(),
+      })),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `track_${selectedUserId}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportTrackCSV = () => {
+    const header = "index,latitude,longitude,timestamp,time";
+    const rows = trackPoints.map((p, i) =>
+      [
+        i + 1,
+        p.lat,
+        p.lng,
+        p.timestamp,
+        new Date(p.timestamp).toISOString(),
+      ].join(",")
+    );
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `track_${selectedUserId}_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -280,7 +361,7 @@ export default function Track() {
 
   return (
     <div className="h-full flex flex-col relative">
-      <div className="absolute top-4 left-4 z-20 z-10">
+      <div className="absolute top-4 left-4 z-20 z-10 space-y-2">
         <div className="bg-slate-900/70 backdrop-blur-xl rounded-xl border border-slate-700/30 p-3 w-56">
           <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1.5">
             <User className="w-3.5 h-3.5" />
@@ -303,6 +384,81 @@ export default function Track() {
                   </option>
                 ))}
           </select>
+        </div>
+
+        <div className="bg-slate-900/70 backdrop-blur-xl rounded-xl border border-slate-700/30 p-3 w-56">
+          <button
+            onClick={() => setShowTimePicker(!showTimePicker)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 border border-slate-700/30 rounded-lg text-slate-200 text-sm hover:bg-slate-800 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-sky-400" />
+              时间范围
+            </span>
+            <span className="text-xs text-slate-500">
+              {startTime || endTime ? "已设置" : "全部"}
+            </span>
+          </button>
+
+          {showTimePicker && (
+            <div className="mt-3 space-y-2 pt-3 border-t border-slate-700/30">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">开始时间</label>
+                <input
+                  type="datetime-local"
+                  value={startTime ? new Date(startTime).toISOString().slice(0, 16) : ""}
+                  onChange={(e) => setStartTime(e.target.value ? new Date(e.target.value).getTime() : null)}
+                  className="w-full px-2 py-1.5 bg-slate-800/50 border border-slate-700/30 rounded-lg text-slate-200 text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">结束时间</label>
+                <input
+                  type="datetime-local"
+                  value={endTime ? new Date(endTime).toISOString().slice(0, 16) : ""}
+                  onChange={(e) => setEndTime(e.target.value ? new Date(e.target.value).getTime() : null)}
+                  className="w-full px-2 py-1.5 bg-slate-800/50 border border-slate-700/30 rounded-lg text-slate-200 text-xs"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleTimeRangeChange}
+                  className="flex-1 px-2 py-1.5 bg-sky-500/20 text-sky-400 rounded-lg text-xs font-medium hover:bg-sky-500/30 transition-colors"
+                >
+                  应用
+                </button>
+                <button
+                  onClick={resetTimeRange}
+                  className="flex-1 px-2 py-1.5 bg-slate-700/50 text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-700 transition-colors"
+                >
+                  重置
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-slate-900/70 backdrop-blur-xl rounded-xl border border-slate-700/30 p-3 w-56">
+          <div className="text-xs text-slate-400 mb-2 flex items-center gap-1.5">
+            <Download className="w-3.5 h-3.5" />
+            导出轨迹
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={exportTrackJSON}
+              disabled={trackPoints.length === 0}
+              className="flex-1 px-2 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-medium hover:bg-emerald-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              JSON
+            </button>
+            <button
+              onClick={exportTrackCSV}
+              disabled={trackPoints.length === 0}
+              className="flex-1 px-2 py-1.5 bg-amber-500/20 text-amber-400 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              CSV
+            </button>
+          </div>
         </div>
       </div>
 

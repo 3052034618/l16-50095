@@ -75,7 +75,7 @@ function MapEventHandler({
 }
 
 export default function Fences() {
-  const { fences, fenceEvents, setFences, addFenceEvent } = useLocationStore();
+  const { fences, fenceEvents, fenceEventsLoaded, setFences, addFenceEvent, setFenceEvents } = useLocationStore();
   const [drawMode, setDrawMode] = useState<DrawMode>("none");
   const [tempCircleCenter, setTempCircleCenter] = useState<[number, number] | null>(null);
   const [tempCircleRadius, setTempCircleRadius] = useState<number>(0);
@@ -104,8 +104,10 @@ export default function Fences() {
 
   useEffect(() => {
     loadFences();
-    loadEvents();
-  }, []);
+    if (!fenceEventsLoaded) {
+      loadEvents();
+    }
+  }, [fenceEventsLoaded]);
 
   const loadFences = async () => {
     try {
@@ -119,7 +121,7 @@ export default function Fences() {
   const loadEvents = async () => {
     try {
       const data = await fetchFenceEvents(50);
-      data.forEach((event) => addFenceEvent(event));
+      setFenceEvents(data);
     } catch (error) {
       console.error("Failed to load fence events:", error);
     }

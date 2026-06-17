@@ -6,43 +6,49 @@ export function searchNearby(
   lat: number,
   lng: number,
   radius: number,
-  category?: string
+  category?: string,
+  type?: 'user' | 'merchant' | 'all'
 ): NearbyResult {
   const items: NearbyItem[] = [];
+  const searchType = type || 'all';
 
-  for (const user of users) {
-    if (!user.online) continue;
-    const distance = haversineDistance(lat, lng, user.lat, user.lng);
-    if (distance <= radius) {
-      items.push({
-        id: user.userId,
-        name: user.name,
-        type: 'user',
-        lat: user.lat,
-        lng: user.lng,
-        distance,
-        online: user.online,
-        avatar: user.avatar,
-      });
+  if (searchType === 'all' || searchType === 'user') {
+    for (const user of users) {
+      if (!user.online) continue;
+      const distance = haversineDistance(lat, lng, user.lat, user.lng);
+      if (distance <= radius) {
+        items.push({
+          id: user.userId,
+          name: user.name,
+          type: 'user',
+          lat: user.lat,
+          lng: user.lng,
+          distance,
+          online: user.online,
+          avatar: user.avatar,
+        });
+      }
     }
   }
 
-  const filteredMerchants = category
-    ? merchants.filter((m) => m.category === category)
-    : merchants;
+  if (searchType === 'all' || searchType === 'merchant') {
+    const filteredMerchants = category
+      ? merchants.filter((m) => m.category === category)
+      : merchants;
 
-  for (const merchant of filteredMerchants) {
-    const distance = haversineDistance(lat, lng, merchant.lat, merchant.lng);
-    if (distance <= radius) {
-      items.push({
-        id: merchant.id,
-        name: merchant.name,
-        type: 'merchant',
-        category: merchant.category,
-        lat: merchant.lat,
-        lng: merchant.lng,
-        distance,
-      });
+    for (const merchant of filteredMerchants) {
+      const distance = haversineDistance(lat, lng, merchant.lat, merchant.lng);
+      if (distance <= radius) {
+        items.push({
+          id: merchant.id,
+          name: merchant.name,
+          type: 'merchant',
+          category: merchant.category,
+          lat: merchant.lat,
+          lng: merchant.lng,
+          distance,
+        });
+      }
     }
   }
 

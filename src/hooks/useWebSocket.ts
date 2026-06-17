@@ -61,7 +61,9 @@ export function useWebSocket(): WebSocketHook {
 
     ws.onopen = () => {
       isConnectedRef.current = true;
-      emit('online:users', []);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'online:users' }));
+      }
     };
 
     ws.onmessage = (event) => {
